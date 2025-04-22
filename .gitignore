@@ -1,0 +1,25 @@
+# Ignore build directory
+/build/
+
+# Ignore compiled object files and executables
+*.o
+*.out
+*.exe
+*.a
+*.so
+
+# Ignore CMake-generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+install_manifest.txt
+
+# Ignore user-specific or OS-specific files
+*.log
+*.DS_Store
+*.swp
+
+# Ignore benchmark
+.vscode/
+dbscan

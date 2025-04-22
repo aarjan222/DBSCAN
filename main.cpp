@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <iostream>
 #include "dbscan.h"
+#include "pcloud_processor_n_visualizer.cpp"
 
 #define MINIMUM_POINTS 4     // minimum number of cluster
 #define EPSILON (0.75*0.75)  // distance for clustering, metre^2
@@ -9,7 +10,12 @@ void readBenchmarkData(vector<Point>& points)
 {
     // load point cloud
     FILE *stream;
-    stream = fopen ("benchmark_hepta.dat","ra");
+    stream = fopen ("../benchmark_hepta.dat","r");
+    if (!stream) {
+        perror("Error opening file");
+        exit(EXIT_FAILURE);
+    }
+    
 
     unsigned int minpts, num_points, cluster, i = 0;
     double epsilon;
@@ -48,6 +54,9 @@ void printResults(vector<Point>& points, int num_points)
 
 int main()
 {    
+    // Create viewer
+    pcl::visualization::PCLVisualizer::Ptr viewer = initScene();
+
     vector<Point> points;
 
     // read point data
@@ -60,7 +69,16 @@ int main()
     ds.run();
 
     // result of DBSCAN algorithm
-    printResults(ds.m_points, ds.getTotalPointSize());    
+    printResults(ds.m_points, ds.getTotalPointSize());  
+    
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr clustered_cloud = convertToPCLCloud(ds.m_points);
 
+    // render the input cloud
+    renderPointCloud(viewer, clustered_cloud, "clustered cloud");
+
+    while (!viewer->wasStopped())
+    {
+        viewer->spin();
+    }
     return 0;
 }
