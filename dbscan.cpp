@@ -1,21 +1,29 @@
 #include "dbscan.h"
+#include <chrono>
+#include <iostream>
 
 // Iterates through all points. If a point is unclassified, it tries to expand a 
 // cluster from that point.
 int DBSCAN::run()
 {
+    auto startTime = std::chrono::steady_clock::now();
+
     int clusterID = 1;
     vector<Point>::iterator iter;
     for(iter = m_points.begin(); iter != m_points.end(); ++iter)
     {
-        if ( iter->clusterID == UNCLASSIFIED )
+        if ( iter->clusterID == UNCLASSIFIED )//for all of the unclustered core points
         {
-            if ( expandCluster(*iter, clusterID) != FAILURE )
+            if ( expandCluster(*iter, clusterID) != FAILURE )//identify all points as either core, border or noise
             {
                 clusterID += 1;
             }
         }
     }
+
+    auto endTime = std::chrono::steady_clock::now();
+    auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime-startTime);
+    std::cout << "DBSCAN took " << elapsedTime.count() << " milliseconds" << std::endl;
 
     return 0;
 }
@@ -32,6 +40,7 @@ This is a recursive-like cluster expansion loop:
 */
 int DBSCAN::expandCluster(Point point, int clusterID)
 {    
+    // clusterSeeds is the vector which contains all the border points for that point within the eps
     vector<int> clusterSeeds = calculateCluster(point);
 
     if ( clusterSeeds.size() < m_minPoints )
@@ -46,39 +55,42 @@ int DBSCAN::expandCluster(Point point, int clusterID)
         vector<int>::iterator iterSeeds;
         /*
         gothrough all indices in clusterSeeds(these are neighbor of the core points)
-        for each point in m_points, you assign it the current clusterID
+        for each point in m_points, you assign it the current clusterID``
         also detect which is the original core point(by comparing coordinates)
         indexCorePoint holds the pos of that core point in the clusterSeeds vector.
         */
         for( iterSeeds = clusterSeeds.begin(); iterSeeds != clusterSeeds.end(); ++iterSeeds)
         {
+            // assign all the border points the same current clusterID
             m_points.at(*iterSeeds).clusterID = clusterID;
             if (m_points.at(*iterSeeds).x == point.x && m_points.at(*iterSeeds).y == point.y && m_points.at(*iterSeeds).z == point.z )
             {
                 indexCorePoint = index;
             }
-            ++index;
+            ++index;// find the index of the corePoint
         }
         /*
-        remove the core point from clusterSeeds
+        remove the corePoint from clusterSeeds
         core point does not need to be processed again in the next loop
-        only it neighbors are processed for further cluster expansion.
+        only its border points are processed for further cluster expansion.
         */
         clusterSeeds.erase(clusterSeeds.begin()+indexCorePoint);
         
         /*
-        iterate over the rest of the seeds (neighbors)
+        iterate over the rest of the seeds (neighbors) border points
         */
        
-       // for each of the neighbor clusterSeeds[i] do the following:
+       // for each of the neighbor(border points) clusterSeeds[i] do the following:
        for( vector<int>::size_type i = 0, n = clusterSeeds.size(); i < n; ++i )
        {
             // get neighbors of this neighbor,
             // you get all points within epsilon distance of this neighbor -- i.e its neighbors.
             vector<int> clusterNeighors = calculateCluster(m_points.at(clusterSeeds[i]));
+            // this is the list of border points of the previous border points
 
             // this means that this is also a core point.
             // so it can also grow the cluster.
+            // check if this border points has enough minPts to become a core point.
             if ( clusterNeighors.size() >= m_minPoints )
             {
                 vector<int>::iterator iterNeighors;
@@ -129,3 +141,31 @@ inline double DBSCAN::calculateDistance(const Point& pointCore, const Point& poi
 }
 
 
+/* 
+* TimeComplexity
+
+run () iterates over all points: O(N)
+for each unclassified point, it calls expandCluster()
+
+expandCluster()
+calls calculateCluster()
+    for each point, it computes distance to every other point O(N)
+then iterates over neighbors and if any core points, 
+    recursively find their neighbors.
+
+worst-case: every point is a neighbor to every other point(dense dataset)
+so in the worst-case: expandCluster() could do O(N^2) total work(each point checking all others.)
+
+Even though you do nested loops, you're not doing N * N * N work always.
+at worst youre doing sth like O(N) expandCluster calls, each of which may do upto O(N) neighbor
+checks and each neighbor check is O(N) -- but in practice, you dont reprocess already labeled.
+you avoid recomputing for points already added to a cluster.
+
+calculateCluster()
+O(N) as it loops over all N points.
+
+Hence
+WORST TIME COMPLEXITY:
+O(N^2)
+
+*/

@@ -1,6 +1,7 @@
 #include <pcl/point_types.h>
 #include <pcl/visualization/pcl_visualizer.h>
 #include <pcl/point_cloud.h>
+#include <pcl/io/pcd_io.h>
 #include <thread>
 #include <map>
 #include "dbscan.h"
@@ -14,79 +15,83 @@ struct Color
     }
 };
 
-pcl::visualization::PCLVisualizer::Ptr initScene()
+pcl::PointCloud<pcl::PointXYZI>::Ptr CreateData3D(std::string file)
 {
-    pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Clustering"));
-    viewer->setBackgroundColor(0, 0, 0); // rgb 000= black
-    viewer->initCameraParameters();
-    viewer->setCameraPosition(0, 0, 15, 0, 1, 0);
-    viewer->addCoordinateSystem(1.0); // scale=1.0
-    return viewer;
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>());
+
+    if (pcl::io::loadPCDFile<pcl::PointXYZI>(file, *cloud) == -1)
+    {
+        PCL_ERROR("Couldn't Read File\n");
+    }
+
+    std::cerr << "Loaded " << cloud->points.size() << " data points from " + file << std::endl;
+    return cloud;
 }
 
-void renderPointCloud(pcl::visualization::PCLVisualizer::Ptr &viewer, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, std::string name)
+// Function to convert pcl::PointCloud<pcl::PointXYZI>::Ptr to std::vector<LidarPoint>
+std::vector<Point> convertToLidarPoints(const pcl::PointCloud<pcl::PointXYZI>::Ptr &cloud)
 {
+    std::vector<Point> lidarPoints;
+    lidarPoints.reserve(cloud->points.size());
 
-    viewer->addPointCloud<pcl::PointXYZRGB>(cloud, name);
-    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 4, name);
+    for (const auto &pclPoint : cloud->points)
+    {
+        Point lidarPoint;
+        lidarPoint.x = static_cast<double>(pclPoint.x);
+        lidarPoint.y = static_cast<double>(pclPoint.y);
+        lidarPoint.z = static_cast<double>(pclPoint.z);
+        // lidarPoint.r = static_cast<double>(pclPoint.intensity); // Intensity as reflectivity
+
+        lidarPoints.push_back(lidarPoint);
+    }
+
+    return lidarPoints;
 }
 
-void renderPointCloud(pcl::visualization::PCLVisualizer::Ptr &viewer, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, std::string name, Color color)
+// Function to convert std::vector<Point> to pcl::PointCloud<pcl::PointXYZI>::Ptr
+void saveClustersToPCD(const std::vector<Point> &points, const std::string &output_dir)
 {
-
-    viewer->addPointCloud<pcl::PointXYZRGB>(cloud, name);
-    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 4, name);
-    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, color.r, color.g, color.b, name);
-}
-
-// Function to convert std::vector<LidarPoint> to pcl::PointCloud<pcl::PointXYZI>::Ptr
-pcl::PointCloud<pcl::PointXYZRGB>::Ptr convertToPCLCloud(const std::vector<Point> &points)
-{
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-   
-    // Assign a unique color for each cluster
-    std::map<int, std::tuple<uint8_t, uint8_t, uint8_t>> clusterColors;
-    int nextColor = 0;
+    // this maps stores 1 PointCloud for each unique clusterID.
+    std::map<int, pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds;
 
     for (const auto &p : points)
     {
-        pcl::PointXYZRGB point;
+        int clusterID = p.clusterID;
+
+        // Create new point
+        pcl::PointXYZI point;
         point.x = p.x;
         point.y = p.y;
         point.z = p.z;
+        point.intensity = 1.0f; // default intensity (could encode clusterID here too)
 
-        int clusterID = p.clusterID;
-
-        if (clusterID == -1)
+        // If clusterID is not present, create a new cloud
+        // if clusterID seen for the first time, create a new empty point cloud for it.3
+        if (clusterClouds.find(clusterID) == clusterClouds.end())
         {
-            // Noise points in gray
-            point.r = 128;
-            point.g = 128;
-            point.b = 128;
-        }
-        else
-        {
-            if (clusterColors.find(clusterID) == clusterColors.end())
-            {
-                // Generate a unique color
-                uint8_t r = 50 + (nextColor * 50) % 255;
-                uint8_t g = 80 + (nextColor * 80) % 255;
-                uint8_t b = 100 + (nextColor * 120) % 255;
-                clusterColors[clusterID] = std::make_tuple(r, g, b);
-                nextColor++;
-            }
-            auto [r, g, b] = clusterColors[clusterID];
-            point.r = r;
-            point.g = g;
-            point.b = b;
+            clusterClouds[clusterID] = pcl::PointCloud<pcl::PointXYZI>::Ptr(new pcl::PointCloud<pcl::PointXYZI>);
         }
 
-        cloud->push_back(point);
+        // Add the point to the corresponding point cloud
+        clusterClouds[clusterID]->push_back(point);
     }
 
-    cloud->width = cloud->points.size();
-    cloud->height = 1;
-    cloud->is_dense = true;
+    // Save each cluster as a separate .pcd file
+    for (const auto &pair : clusterClouds)
+    {
+        int clusterID = pair.first;
+        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud = pair.second;
 
-    return cloud;
+        // Skip empty clouds
+        if (cloud->empty())
+            continue;
+
+        std::stringstream ss;
+        if (clusterID == -1)
+            ss << output_dir << "/noise.pcd";
+        else
+            ss << output_dir << "/cluster_" << clusterID << ".pcd";
+
+        pcl::io::savePCDFileBinary(ss.str(), *cloud);
+    }
 }
